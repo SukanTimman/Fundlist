@@ -69,8 +69,9 @@
   /* LAYOUT */
   .app {
     display: grid;
-    grid-template-columns: 280px 1fr;
+    grid-template-columns: var(--sidebar-w, 280px) 1fr;
     height: calc(100vh - 57px);
+    overflow: hidden;
   }
 
   /* SIDEBAR */
@@ -78,14 +79,126 @@
     background: var(--surface);
     border-right: 1px solid var(--border);
     overflow-y: auto;
+    overflow-x: hidden;
     padding: 20px 16px;
     display: flex;
     flex-direction: column;
     gap: 20px;
+    position: relative;
+    min-width: 0;
+    transition: padding 0.2s;
   }
   aside::-webkit-scrollbar { width: 4px; }
   aside::-webkit-scrollbar-track { background: transparent; }
   aside::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 4px; }
+
+  /* SIDEBAR RESIZE HANDLE */
+  .sidebar-resize-handle {
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 6px;
+    cursor: col-resize;
+    z-index: 50;
+    background: transparent;
+    transition: background 0.15s;
+    touch-action: none;
+  }
+  .sidebar-resize-handle::after {
+    content: '';
+    position: absolute;
+    right: 2px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 2px;
+    height: 32px;
+    background: var(--border2);
+    border-radius: 2px;
+    transition: background 0.15s, height 0.15s;
+  }
+  .sidebar-resize-handle:hover::after,
+  .sidebar-resize-handle.dragging::after {
+    background: var(--accent);
+    height: 48px;
+  }
+  .sidebar-resize-handle:hover,
+  .sidebar-resize-handle.dragging {
+    background: rgba(59,130,246,0.06);
+  }
+
+  /* SIDEBAR COLLAPSED STATE */
+  .app.sidebar-collapsed {
+    --sidebar-w: 0px;
+  }
+  .app.sidebar-collapsed aside {
+    padding: 0;
+    overflow: hidden;
+  }
+  .app.sidebar-collapsed aside > * {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  /* MOBILE SIDEBAR TOGGLE BUTTON */
+  .sidebar-toggle {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text2);
+    cursor: pointer;
+    font-size: 16px;
+    flex-shrink: 0;
+    transition: all 0.15s;
+  }
+  .sidebar-toggle:hover { border-color: var(--accent); color: var(--accent2); }
+
+  /* MOBILE OVERLAY */
+  .sidebar-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 90;
+    backdrop-filter: blur(2px);
+  }
+  .sidebar-overlay.visible { display: block; }
+
+  /* MOBILE STYLES */
+  @media (max-width: 768px) {
+    .app {
+      grid-template-columns: 1fr;
+      position: relative;
+    }
+    aside {
+      position: fixed;
+      top: 57px;
+      left: 0;
+      bottom: 0;
+      width: 85vw;
+      max-width: 320px;
+      z-index: 95;
+      transform: translateX(-100%);
+      transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+      padding: 20px 16px;
+      overflow-y: auto;
+    }
+    aside.mobile-open {
+      transform: translateX(0);
+    }
+    aside > * {
+      opacity: 1 !important;
+      pointer-events: auto !important;
+    }
+    .sidebar-resize-handle { display: none; }
+    .sidebar-toggle { display: flex; }
+    main { grid-column: 1; }
+  }
 
   .filter-group { display: flex; flex-direction: column; gap: 8px; }
   .filter-label {
@@ -465,13 +578,25 @@
   .resizable-table { table-layout: fixed; }
   .col-resizer {
     position: absolute;
-    right: 0; top: 0; bottom: 0;
-    width: 6px;
+    right: -4px; top: 0; bottom: 0;
+    width: 10px;
     cursor: col-resize;
     background: transparent;
     z-index: 10;
+    touch-action: none;
   }
-  .col-resizer:hover, .col-resizer.dragging { background: var(--accent); opacity: 0.6; }
+  .col-resizer::after {
+    content: '';
+    position: absolute;
+    left: 50%; top: 20%; bottom: 20%;
+    transform: translateX(-50%);
+    width: 2px;
+    background: transparent;
+    border-radius: 2px;
+    transition: background 0.15s;
+  }
+  .col-resizer:hover::after, .col-resizer.dragging::after { background: var(--accent); }
+  .col-resizer.dragging { background: rgba(59,130,246,0.08); }
   thead th { position: relative; overflow: visible; }
 
   /* COMPARE */
@@ -616,6 +741,7 @@
 <body>
 
 <header>
+  <button class="sidebar-toggle" id="sidebar-toggle" title="เปิด/ปิด ตัวกรอง" aria-label="Toggle sidebar">☰</button>
   <div class="logo">fund<span>.</span>screener</div>
   <div style="color:var(--text3);font-size:13px;">— เปรียบเทียบกองทุนรวมไทย</div>
   <div class="header-stats">
@@ -624,9 +750,11 @@
   </div>
 </header>
 
-<div class="app">
+<div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+<div class="app" id="app">
   <!-- SIDEBAR -->
-  <aside>
+  <aside id="sidebar">
     <div class="filter-group">
       <div class="filter-label">🔍 ค้นหา</div>
       <div class="search-wrap">
@@ -699,6 +827,9 @@
     </div>
 
     <button class="reset-btn" onclick="resetFilters()">↺ รีเซ็ตทุก filter</button>
+
+    <!-- RESIZE HANDLE (desktop only) -->
+    <div class="sidebar-resize-handle" id="sidebar-resize-handle" title="ลากเพื่อปรับขนาด"></div>
   </aside>
 
   <!-- MAIN TABLE -->
@@ -1303,31 +1434,205 @@ function closeCompareModal(e) {
     document.getElementById('compare-overlay').classList.remove('open');
 }
 
+// ===== RESIZABLE SIDEBAR =====
+(function() {
+  const MIN_W = 180;
+  const MAX_W = 480;
+  const DEFAULT_W = 280;
+  const STORAGE_KEY = 'sidebar-width';
+
+  const app = document.getElementById('app');
+  const sidebar = document.getElementById('sidebar');
+  const handle = document.getElementById('sidebar-resize-handle');
+  const overlay = document.getElementById('sidebar-overlay');
+  const toggleBtn = document.getElementById('sidebar-toggle');
+
+  // Restore saved width (desktop only)
+  function isMobile() { return window.innerWidth <= 768; }
+
+  function setSidebarWidth(w) {
+    w = Math.min(MAX_W, Math.max(MIN_W, w));
+    app.style.setProperty('--sidebar-w', w + 'px');
+    try { localStorage.setItem(STORAGE_KEY, w); } catch(e) {}
+  }
+
+  function initWidth() {
+    if (isMobile()) return;
+    try {
+      const saved = parseInt(localStorage.getItem(STORAGE_KEY));
+      if (saved && saved >= MIN_W && saved <= MAX_W) setSidebarWidth(saved);
+      else setSidebarWidth(DEFAULT_W);
+    } catch(e) { setSidebarWidth(DEFAULT_W); }
+  }
+  initWidth();
+  window.addEventListener('resize', () => {
+    if (!isMobile()) initWidth();
+  });
+
+  // ---- Desktop drag resize ----
+  let dragging = false, startX = 0, startW = 0;
+
+  handle.addEventListener('mousedown', e => {
+    if (isMobile()) return;
+    dragging = true;
+    startX = e.clientX;
+    startW = sidebar.offsetWidth;
+    handle.classList.add('dragging');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    e.preventDefault();
+  });
+
+  document.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    setSidebarWidth(startW + e.clientX - startX);
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false;
+    handle.classList.remove('dragging');
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  });
+
+  // Touch support for handle (tablet/hybrid)
+  handle.addEventListener('touchstart', e => {
+    if (isMobile()) return;
+    dragging = true;
+    startX = e.touches[0].clientX;
+    startW = sidebar.offsetWidth;
+    handle.classList.add('dragging');
+    e.preventDefault();
+  }, { passive: false });
+
+  document.addEventListener('touchmove', e => {
+    if (!dragging) return;
+    setSidebarWidth(startW + e.touches[0].clientX - startX);
+  }, { passive: true });
+
+  document.addEventListener('touchend', () => {
+    if (!dragging) return;
+    dragging = false;
+    handle.classList.remove('dragging');
+  });
+
+  // ---- Mobile: swipe from left edge to open ----
+  let touchStartX = 0, touchStartY = 0, swipeActive = false;
+  const EDGE_ZONE = 28; // px from left edge
+
+  document.addEventListener('touchstart', e => {
+    if (!isMobile()) return;
+    touchStartX = e.touches[0].clientX;
+    touchStartY = e.touches[0].clientY;
+    // Open: swipe right from left edge
+    // Close: swipe left anywhere when sidebar is open
+    swipeActive = touchStartX <= EDGE_ZONE || sidebar.classList.contains('mobile-open');
+  }, { passive: true });
+
+  document.addEventListener('touchend', e => {
+    if (!isMobile() || !swipeActive) return;
+    const dx = e.changedTouches[0].clientX - touchStartX;
+    const dy = e.changedTouches[0].clientY - touchStartY;
+    if (Math.abs(dx) < Math.abs(dy) * 0.8 || Math.abs(dx) < 40) return; // more vertical than horizontal, ignore
+    if (dx > 40 && touchStartX <= EDGE_ZONE) openMobileSidebar();
+    else if (dx < -40 && sidebar.classList.contains('mobile-open')) closeMobileSidebar();
+    swipeActive = false;
+  }, { passive: true });
+
+  function openMobileSidebar() {
+    sidebar.classList.add('mobile-open');
+    overlay.classList.add('visible');
+    toggleBtn.textContent = '✕';
+  }
+  function closeMobileSidebar() {
+    sidebar.classList.remove('mobile-open');
+    overlay.classList.remove('visible');
+    toggleBtn.textContent = '☰';
+  }
+
+  toggleBtn.addEventListener('click', () => {
+    if (sidebar.classList.contains('mobile-open')) closeMobileSidebar();
+    else openMobileSidebar();
+  });
+
+  overlay.addEventListener('click', closeMobileSidebar);
+
+  // Close mobile sidebar when a filter changes (UX convenience)
+  sidebar.addEventListener('change', () => { if (isMobile()) closeMobileSidebar(); });
+  sidebar.addEventListener('click', e => {
+    if (isMobile() && (e.target.classList.contains('chip') || e.target.classList.contains('sort-btn') || e.target.classList.contains('reset-btn'))) {
+      setTimeout(closeMobileSidebar, 120);
+    }
+  });
+})();
+
 // ===== RESIZABLE COLUMNS =====
 function initResizableColumns() {
   const table = document.getElementById('main-table');
   if (!table) return;
   const resizers = table.querySelectorAll('.col-resizer');
   resizers.forEach(resizer => {
-    let startX, startW, th;
-    resizer.addEventListener('mousedown', e => {
+    let startX, startW, th, isDragging = false;
+
+    function startDrag(clientX) {
       th = resizer.parentElement;
-      startX = e.pageX;
+      startX = clientX;
       startW = th.offsetWidth;
+      isDragging = false;
       resizer.classList.add('dragging');
-      document.addEventListener('mousemove', onMove);
-      document.addEventListener('mouseup', onUp);
-      e.preventDefault();
-    });
-    function onMove(e) {
-      const w = Math.max(50, startW + e.pageX - startX);
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+    }
+
+    function onMove(clientX) {
+      const delta = clientX - startX;
+      if (!isDragging && Math.abs(delta) > 3) isDragging = true;
+      if (!isDragging) return;
+      const w = Math.max(50, startW + delta);
       th.style.width = w + 'px';
     }
-    function onUp() {
+
+    function endDrag() {
       resizer.classList.remove('dragging');
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
     }
+
+    // --- Mouse ---
+    resizer.addEventListener('mousedown', e => {
+      startDrag(e.clientX);
+      document.addEventListener('mousemove', onMouseMove);
+      document.addEventListener('mouseup', onMouseUp);
+      e.preventDefault();
+      e.stopPropagation();
+    });
+    function onMouseMove(e) { onMove(e.clientX); }
+    function onMouseUp() {
+      endDrag();
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    }
+
+    // --- Touch ---
+    resizer.addEventListener('touchstart', e => {
+      startDrag(e.touches[0].clientX);
+      document.addEventListener('touchmove', onTouchMove, { passive: false });
+      document.addEventListener('touchend', onTouchEnd);
+      e.stopPropagation();
+    }, { passive: true });
+    function onTouchMove(e) {
+      onMove(e.touches[0].clientX);
+      if (isDragging) e.preventDefault();
+    }
+    function onTouchEnd() {
+      endDrag();
+      document.removeEventListener('touchmove', onTouchMove);
+      document.removeEventListener('touchend', onTouchEnd);
+    }
+
+    // Prevent column sort click from firing after a drag
+    resizer.addEventListener('click', e => { if (isDragging) e.stopPropagation(); });
   });
 }
 </script>
